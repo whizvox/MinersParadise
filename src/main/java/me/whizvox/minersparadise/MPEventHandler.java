@@ -1,24 +1,29 @@
 package me.whizvox.minersparadise;
 
-import me.whizvox.minersparadise.api.BoreUpgrade;
 import me.whizvox.minersparadise.capability.MPCapabilities;
+import me.whizvox.minersparadise.init.GadgetUpgrades;
 import me.whizvox.minersparadise.item.HandheldBoreItem;
 import me.whizvox.minersparadise.util.NBTUtil;
 import me.whizvox.minersparadise.util.UpgradeUtil;
 import net.minecraft.block.Block;
-import net.minecraft.entity.item.ItemEntity;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.loot.LootContext;
+import net.minecraft.loot.LootParameters;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.BlockRayTraceResult;
 import net.minecraft.util.math.RayTraceResult;
+import net.minecraft.util.math.vector.Vector3d;
 import net.minecraft.util.math.vector.Vector3i;
 import net.minecraft.world.IBlockReader;
 import net.minecraft.world.World;
+import net.minecraft.world.server.ServerWorld;
 import net.minecraftforge.common.ForgeMod;
+import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.energy.CapabilityEnergy;
-import net.minecraftforge.event.entity.EntityJoinWorldEvent;
 import net.minecraftforge.event.world.BlockEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -62,26 +67,27 @@ public class MPEventHandler {
     }
   }
 
-  private static boolean breakingBlock = false;
-  private static ArrayList<ItemStack> drops = new ArrayList<>();
+  private static boolean breakingBlocks = false;
 
   @SubscribeEvent
   public static void onBlockBreak(BlockEvent.BreakEvent event) {
-    if (!breakingBlock && !event.getWorld().isRemote() && event.getPlayer() instanceof ServerPlayerEntity) {
+    if (!breakingBlocks && !event.getWorld().isRemote() && event.getPlayer() instanceof ServerPlayerEntity) {
       ServerPlayerEntity player = (ServerPlayerEntity) event.getPlayer();
       ItemStack heldStack = event.getPlayer().getHeldItemMainhand();
       if (heldStack.getItem() instanceof HandheldBoreItem) {
         heldStack.getCapability(CapabilityEnergy.ENERGY).ifPresent(energy -> {
           if (energy.getEnergyStored() > 0) {
-            heldStack.getCapability(MPCapabilities.UPGRADABLE_BORE).ifPresent(bore -> {
-              boolean isMagnetOn = bore.isActive(BoreUpgrade.MAGNET);
+            heldStack.getCapability(MPCapabilities.GADGET).ifPresent(gadget -> {
+              boolean isMagnetOn = gadget.isActive(GadgetUpgrades.MAGNET);
+              boolean isSilkTouchEnabled = gadget.isActive(GadgetUpgrades.SILK_TOUCH);
+              byte fortuneLevel = gadget.getActiveLevel(GadgetUpgrades.FORTUNE);
               HashSet<BlockPos> blocksToMine = new HashSet<>();
               blocksToMine.add(event.getPos());
-              if (bore.isActive(BoreUpgrade.AREA)) {
+              if (gadget.isActive(GadgetUpgrades.AREA)) {
                 RayTraceResult rayTrace = event.getPlayer().pick(event.getPlayer().getAttribute(ForgeMod.REACH_DISTANCE.get()).getValue(), 1F, false);
                 if (rayTrace.getType() == RayTraceResult.Type.BLOCK) {
                   Direction.Axis axis = ((BlockRayTraceResult) rayTrace).getFace().getAxis();
-                  int radius = UpgradeUtil.getAreaRadius(bore.getActiveLevel(BoreUpgrade.AREA));
+                  int radius = UpgradeUtil.getAreaRadius(gadget.getActiveLevel(GadgetUpgrades.AREA));
                   for (int i = -radius; i <= radius; i++) {
                     for (int j = -radius; j <= radius; j++) {
                       if (i != 0 || j != 0) {
@@ -102,14 +108,14 @@ public class MPEventHandler {
                 }
               }
 
-              if (bore.isActive(BoreUpgrade.VEIN_MINING)) {
-                breadthFirstBlockSearch(event.getWorld(), event.getState().getBlock(), UpgradeUtil.getMaxVeinMineCount(bore.getActiveLevel(BoreUpgrade.VEIN_MINING)), blocksToMine, event.getPos());
+              if (gadget.isActive(GadgetUpgrades.VEIN_MINING)) {
+                breadthFirstBlockSearch(event.getWorld(), event.getState().getBlock(), UpgradeUtil.getMaxVeinMineCount(gadget.getActiveLevel(GadgetUpgrades.VEIN_MINING)), blocksToMine, event.getPos());
               }
 
-              breakingBlock = true;
-              drops.clear();
-              blocksToMine.forEach(player.interactionManager::tryHarvestBlock);
-              breakingBlock = false;
+              breakingBlocks = true;
+              Set<ItemStack> drops = new HashSet<>();
+              collectDrops((ServerWorld) event.getWorld(), blocksToMine, isSilkTouchEnabled, fortuneLevel, drops);
+              breakingBlocks = false;
               if (isMagnetOn) {
                 boolean dropInWorld = false;
                 for (ItemStack stack : drops) {
@@ -123,7 +129,7 @@ public class MPEventHandler {
                 drops.forEach(stack -> Block.spawnAsEntity((World) event.getWorld(), event.getPos(), stack));
               }
 
-              energy.receiveEnergy(-UpgradeUtil.getFinalEnergyCost(bore), false);
+              energy.receiveEnergy(-UpgradeUtil.getFinalEnergyCost(gadget), false);
               NBTUtil.setEnergy(heldStack, energy.getEnergyStored());
 
             });
@@ -133,12 +139,23 @@ public class MPEventHandler {
     }
   }
 
-  @SubscribeEvent
-  public static void onEntityJoinWorld(EntityJoinWorldEvent event) {
-    if (breakingBlock && event.getEntity() instanceof ItemEntity) {
-      drops.add(((ItemEntity) event.getEntity()).getItem());
-      event.setCanceled(true);
+  private static void collectDrops(ServerWorld world, Set<BlockPos> positions, boolean silkTouch, int fortuneLevel, Set<ItemStack> drops) {
+    ItemStack stack = new ItemStack(Items.NETHERITE_PICKAXE);
+    if (silkTouch) {
+      stack.addEnchantment(Enchantments.SILK_TOUCH, 0);
     }
+    if (fortuneLevel > -1) {
+      stack.addEnchantment(Enchantments.FORTUNE, fortuneLevel);
+    }
+    positions.forEach(pos -> {
+      LootContext.Builder builder = new LootContext.Builder(world)
+        .withRandom(world.getRandom())
+        .withParameter(LootParameters.field_237457_g_, Vector3d.copyCentered(pos))
+        .withParameter(LootParameters.TOOL, stack)
+        .withNullableParameter(LootParameters.THIS_ENTITY, new FakePlayer(world, MinersParadise.FAKE_GAME_PROFILE))
+        .withNullableParameter(LootParameters.BLOCK_ENTITY, world.getTileEntity(pos));
+      drops.addAll(world.getBlockState(pos).getDrops(builder));
+    });
   }
 
 }

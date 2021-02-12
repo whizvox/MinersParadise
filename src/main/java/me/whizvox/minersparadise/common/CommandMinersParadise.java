@@ -8,7 +8,9 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import me.whizvox.minersparadise.api.BoreUpgrade;
+import me.whizvox.minersparadise.MinersParadise;
+import me.whizvox.minersparadise.api.GadgetUpgradeData;
+import me.whizvox.minersparadise.api.IGadgetUpgrade;
 import me.whizvox.minersparadise.capability.MPCapabilities;
 import me.whizvox.minersparadise.util.NBTUtil;
 import net.minecraft.command.CommandSource;
@@ -16,13 +18,16 @@ import net.minecraft.command.Commands;
 import net.minecraft.command.ISuggestionProvider;
 import net.minecraft.entity.player.ServerPlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TranslationTextComponent;
 import net.minecraftforge.energy.CapabilityEnergy;
 
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.StreamSupport;
 
 import static me.whizvox.minersparadise.util.MPLang.*;
 
@@ -42,17 +47,17 @@ public class CommandMinersParadise {
       .then(Commands.literal("install")
         .then(Commands.argument("id", BORE_UPGRADE_TYPE)
           .then(Commands.argument("level", BORE_UPGRADE_LEVEL_TYPE)
-            .executes(ctx -> installUpgrade(ctx, ctx.getArgument("id", BoreUpgrade.class), ctx.getArgument("level", Byte.class))))
-          .executes(ctx -> installUpgrade(ctx, ctx.getArgument("id", BoreUpgrade.class), (byte) 0))))
+            .executes(ctx -> installUpgrade(ctx, ctx.getArgument("id", IGadgetUpgrade.class), ctx.getArgument("level", Byte.class))))
+          .executes(ctx -> installUpgrade(ctx, ctx.getArgument("id", IGadgetUpgrade.class), (byte) 0))))
       .then(Commands.literal("activate")
         .then(Commands.argument("id", BORE_UPGRADE_TYPE)
-          .executes(ctx -> activateUpgrade(ctx, ctx.getArgument("id", BoreUpgrade.class), true))))
+          .executes(ctx -> activateUpgrade(ctx, ctx.getArgument("id", IGadgetUpgrade.class), true))))
       .then(Commands.literal("deactivate")
         .then(Commands.argument("id", BORE_UPGRADE_TYPE)
-          .executes(ctx -> activateUpgrade(ctx, ctx.getArgument("id", BoreUpgrade.class), false))))
+          .executes(ctx -> activateUpgrade(ctx, ctx.getArgument("id", IGadgetUpgrade.class), false))))
       .then(Commands.literal("remove")
         .then(Commands.argument("id", BORE_UPGRADE_TYPE)
-          .executes(ctx -> removeUpgrade(ctx, ctx.getArgument("id", BoreUpgrade.class)))));
+          .executes(ctx -> removeUpgrade(ctx, ctx.getArgument("id", IGadgetUpgrade.class)))));
   }
 
   static ArgumentBuilder<CommandSource, ?> registerEnergize() {
@@ -66,19 +71,25 @@ public class CommandMinersParadise {
 
   // types used for parsing command arguments
 
-  private static ArgumentType<BoreUpgrade> BORE_UPGRADE_TYPE = new ArgumentType<BoreUpgrade>() {
+  private static ArgumentType<IGadgetUpgrade> BORE_UPGRADE_TYPE = new ArgumentType<IGadgetUpgrade>() {
     @Override
-    public BoreUpgrade parse(StringReader reader) throws CommandSyntaxException {
-      String id = reader.readString();
-      BoreUpgrade upgrade = BoreUpgrade.getFromId(id);
-      if (upgrade == null) {
+    public IGadgetUpgrade parse(StringReader reader) throws CommandSyntaxException {
+      String idStr = reader.readString();
+      ResourceLocation id;
+      if (idStr.contains(":")) {
+        id = new ResourceLocation(idStr);
+      } else {
+        id = new ResourceLocation(MinersParadise.MODID, idStr);
+      }
+      Optional<IGadgetUpgrade> upgrade = MinersParadise.getInstance().getGadgetUpgradeRegistry().get(id);
+      if (!upgrade.isPresent()) {
         throw new CommandSyntaxException(CommandSyntaxException.BUILT_IN_EXCEPTIONS.literalIncorrect(), new TranslationTextComponent("minersparadise.command.upgrade.invalid_upgrade", id));
       }
-      return upgrade;
+      return upgrade.get();
     }
     @Override
     public <S> CompletableFuture<Suggestions> listSuggestions(CommandContext<S> context, SuggestionsBuilder builder) {
-      return ISuggestionProvider.suggest(Arrays.stream(BoreUpgrade.values()).map(BoreUpgrade::getId), builder);
+      return ISuggestionProvider.suggest(StreamSupport.stream(MinersParadise.getInstance().getGadgetUpgradeRegistry().spliterator(), false).map(upgrade -> upgrade.getId().toString()), builder);
     }
   };
   private static ArgumentType<Byte> BORE_UPGRADE_LEVEL_TYPE = reader -> {
@@ -96,7 +107,7 @@ public class CommandMinersParadise {
     source.sendFeedback(message, true);
   }
 
-  private static int installUpgrade(CommandContext<CommandSource> ctx, BoreUpgrade upgrade, byte level) throws CommandSyntaxException {
+  private static int installUpgrade(CommandContext<CommandSource> ctx, IGadgetUpgrade upgrade, byte level) throws CommandSyntaxException {
     CommandSource source = ctx.getSource();
     if (level > upgrade.getMaxLevel()) {
       throw new CommandSyntaxException(
@@ -106,9 +117,9 @@ public class CommandMinersParadise {
     }
     ItemStack stack = source.asPlayer().getHeldItemMainhand();
     AtomicBoolean hasCapability = new AtomicBoolean(false);
-    stack.getCapability(MPCapabilities.UPGRADABLE_BORE).ifPresent(bore -> {
+    stack.getCapability(MPCapabilities.GADGET).ifPresent(bore -> {
       hasCapability.set(true);
-      bore.install(upgrade, level);
+      bore.install(new GadgetUpgradeData(upgrade, level));
       NBTUtil.setUpgrades(stack, bore);
       sendMessage(source, COMMAND_UPGRADE_INSTALL_SUCCESS(upgrade, level));
     });
@@ -119,16 +130,16 @@ public class CommandMinersParadise {
     return 0;
   }
 
-  private static int activateUpgrade(CommandContext<CommandSource> ctx, BoreUpgrade upgrade, boolean activate) throws CommandSyntaxException {
+  private static int activateUpgrade(CommandContext<CommandSource> ctx, IGadgetUpgrade upgrade, boolean activate) throws CommandSyntaxException {
     CommandSource source = ctx.getSource();
     ItemStack stack = source.asPlayer().getHeldItemMainhand();
     AtomicBoolean hasCapability = new AtomicBoolean(false);
-    stack.getCapability(MPCapabilities.UPGRADABLE_BORE).ifPresent(bore -> {
+    stack.getCapability(MPCapabilities.GADGET).ifPresent(bore -> {
       hasCapability.set(true);
       if (!bore.isInstalled(upgrade)) {
         sendMessage(source, COMMAND_UPGRADE_ACTIVATE_NOT_INSTALLED(upgrade));
       } else {
-        bore.activate(upgrade, activate);
+        bore.activate(upgrade, activate ? upgrade.getMaxLevel() : -1);
         NBTUtil.setUpgrades(stack, bore);
         if (activate) {
           sendMessage(source, COMMAND_UPGRADE_ACTIVATE_SUCCESS(upgrade));
@@ -144,12 +155,12 @@ public class CommandMinersParadise {
     return 0;
   }
 
-  private static int removeUpgrade(CommandContext<CommandSource> ctx, BoreUpgrade upgrade) throws CommandSyntaxException {
+  private static int removeUpgrade(CommandContext<CommandSource> ctx, IGadgetUpgrade upgrade) throws CommandSyntaxException {
     CommandSource source = ctx.getSource();
     ServerPlayerEntity player = source.asPlayer();
     ItemStack stack = player.getHeldItemMainhand();
     AtomicBoolean hasCapability = new AtomicBoolean(false);
-    stack.getCapability(MPCapabilities.UPGRADABLE_BORE).ifPresent(bore -> {
+    stack.getCapability(MPCapabilities.GADGET).ifPresent(bore -> {
       hasCapability.set(true);
       if (bore.isInstalled(upgrade)) {
         bore.remove(upgrade);

@@ -1,21 +1,18 @@
 package me.whizvox.minersparadise.util;
 
 import me.whizvox.minersparadise.MinersParadise;
-import me.whizvox.minersparadise.api.BoreUpgrade;
-import me.whizvox.minersparadise.api.IUpgradableBore;
+import me.whizvox.minersparadise.api.GadgetUpgradeData;
+import me.whizvox.minersparadise.api.IGadgetUpgrade;
+import me.whizvox.minersparadise.api.IUpgradableGadget;
 import me.whizvox.minersparadise.capability.MPCapabilities;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.CompoundNBT;
-import net.minecraft.nbt.ListNBT;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.energy.CapabilityEnergy;
 import net.minecraftforge.energy.IEnergyStorage;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Optional;
 
 public class NBTUtil {
 
@@ -35,25 +32,8 @@ public class NBTUtil {
 
   private static final String
       KEY_ENERGY = "energy",
-      KEY_UPGRADES = "upgrades";
-
-  private static int getInt(ItemStack stack, String key, int defaultValue) {
-    CompoundNBT nbt = stack.getOrCreateTag();
-    if (nbt.contains(key, ID_NUMBER)) {
-      return nbt.getInt(key);
-    }
-    nbt.putInt(key, defaultValue);
-    return defaultValue;
-  }
-
-  private static CompoundNBT getCompound(ItemStack stack, String key, CompoundNBT defaultValue) {
-    CompoundNBT nbt = stack.getOrCreateTag();
-    if (nbt.contains(key, ID_COMPOUND)) {
-      return nbt.getCompound(key);
-    }
-    nbt.put(key, defaultValue);
-    return defaultValue;
-  }
+      KEY_UPGRADES = "upgrades",
+      KEY_UPGRADE = "upgrade";
 
   private static void setInt(ItemStack stack, String key, int value) {
     stack.getOrCreateTag().putInt(key, value);
@@ -70,8 +50,16 @@ public class NBTUtil {
     setInt(stack, KEY_ENERGY, energy);
   }
 
-  public static void setUpgrades(ItemStack stack, IUpgradableBore bore) {
-    stack.getOrCreateTag().put(KEY_UPGRADES, MPCapabilities.UPGRADABLE_BORE.writeNBT(bore, null));
+  public static void setUpgrades(ItemStack stack, IUpgradableGadget bore) {
+    stack.getOrCreateTag().put(KEY_UPGRADES, MPCapabilities.GADGET.writeNBT(bore, null));
+  }
+
+  public static void setUpgrade(ItemStack stack, GadgetUpgradeData upgrade) {
+    stack.getOrCreateTag().put(KEY_UPGRADE, MPCapabilities.UPGRADE_DATA.writeNBT(upgrade, null));
+  }
+
+  public static void setUpgrade(ItemStack stack, ResourceLocation id, byte level) {
+    MinersParadise.getInstance().getGadgetUpgradeRegistry().get(id).ifPresent(upgrade -> setUpgrade(stack, new GadgetUpgradeData(upgrade, level)));
   }
 
 }

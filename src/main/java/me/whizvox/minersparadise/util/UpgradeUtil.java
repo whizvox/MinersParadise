@@ -1,9 +1,9 @@
 package me.whizvox.minersparadise.util;
 
 import me.whizvox.minersparadise.MPConfig;
-import me.whizvox.minersparadise.api.BoreUpgrade;
 import me.whizvox.minersparadise.api.IBoreTier;
-import me.whizvox.minersparadise.api.IUpgradableBore;
+import me.whizvox.minersparadise.api.IUpgradableGadget;
+import me.whizvox.minersparadise.init.GadgetUpgrades;
 
 public class UpgradeUtil {
 
@@ -46,18 +46,18 @@ public class UpgradeUtil {
     return (float) (MPConfig.BORE_COST_EFFICIENCY.get() * (level + 1));
   }
 
-  public static int getFinalEnergyCost(IUpgradableBore bore) {
+  public static int getFinalEnergyCost(IUpgradableGadget bore) {
     double cost = MPConfig.BORE_BASE_ENERGY_COST.get();
-    cost *= getEfficiencyCostEffect(bore.getActiveLevel(BoreUpgrade.EFFICIENCY));
-    if (bore.isActive(BoreUpgrade.SILK_TOUCH)) {
-      cost *= MPConfig.BORE_COST_SILK_TOUCH.get();
+    cost *= getEfficiencyCostEffect(bore.getActiveLevel(GadgetUpgrades.EFFICIENCY));
+    if (bore.isActive(GadgetUpgrades.SILK_TOUCH)) {
+      cost += cost * MPConfig.BORE_COST_SILK_TOUCH.get();
     }
-    if (bore.isActive(BoreUpgrade.VEIN_MINING)) {
-      cost *= MPConfig.BORE_COST_VEIN_MINING.get();
+    if (bore.isActive(GadgetUpgrades.VEIN_MINING)) {
+      cost += cost * MPConfig.BORE_COST_VEIN_MINING.get();
     }
     // TODO Maybe don't multiply the cost if the player ran out of inventory space
-    if (bore.isActive(BoreUpgrade.MAGNET)) {
-      cost *= MPConfig.BORE_COST_MAGNET.get();
+    if (bore.isActive(GadgetUpgrades.MAGNET)) {
+      cost += cost * MPConfig.BORE_COST_MAGNET.get();
     }
     return (int) cost;
   }
